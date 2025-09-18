@@ -34,6 +34,7 @@ private:
         INA226,
         INA228,
         INA238,
+        INAFS,
     };
 
     static const uint8_t i2c_probe_addresses[];
@@ -63,6 +64,9 @@ private:
     } accumulate;
     float current_LSB;
     float voltage_LSB;
+
+    float temperature;
+    bool has_temp;
 };
 
 #endif // AP_BATTERY_INA2XX_ENABLED
