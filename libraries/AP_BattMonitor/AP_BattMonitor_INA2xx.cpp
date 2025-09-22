@@ -52,7 +52,7 @@ extern const AP_HAL::HAL& hal;
 #define REG_FS_MAINS_HEALTH    0x07
 #define REG_FS_MANUFACT_ID     0x08
 #define REG_FS_DEVICE_ID       0x09
-#define FS_MANUFACT_ID         uint16_t(('A' << 8) | ('I'+'Q'))  //  0x419A AIQ Manufaturer
+#define FS_MANUFACT_ID         uint16_t(('A' << 8) | ('I'+'Q'))  //  0x419A AIQ Company ID
 #define FS_DEVICE_ID           uint16_t(('F' << 8) | ('S'))      //  0x4653 Device ID
 #define FS_TEMP_C_LSB          4.725e-3
 
