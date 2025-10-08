@@ -34,7 +34,7 @@ extern const AP_HAL::HAL& hal;
 
 // INA238 specific registers
 #define REG_238_CONFIG        0x00
-#define  REG_238_CONFIG_RESET   0x8000
+#define REG_238_CONFIG_RESET  0x8000
 #define REG_238_ADC_CONFIG    0x01
 #define REG_238_SHUNT_CAL     0x02
 #define REG_238_VBUS          0x05
@@ -42,19 +42,22 @@ extern const AP_HAL::HAL& hal;
 #define REG_238_MANUFACT_ID   0x3e
 #define REG_238_DEVICE_ID     0x3f
 
-// // Failsafe specific register
-#define REG_FS_BAT_VOL         0x01
-#define REG_FS_BAT_CURR        0x02
-#define REG_FS_TEMP1           0x03
-#define REG_FS_TEMP2           0x04
-#define REG_FS_MAINS_STATUS    0x05
-#define REG_FS_BATT_STATUS     0x06
-#define REG_FS_MAINS_HEALTH    0x07
-#define REG_FS_MANUFACT_ID     0x08
-#define REG_FS_DEVICE_ID       0x09
-#define FS_MANUFACT_ID         uint16_t(('A' << 8) | ('I'+'Q'))  //  0x419A AIQ Company ID
-#define FS_DEVICE_ID           uint16_t(('F' << 8) | ('S'))      //  0x4653 Device ID
-#define FS_TEMP_C_LSB          4.725e-3
+// // Failsafe Battery specific register
+#define REG_FSB_BAT_VOL         0x01
+#define REG_FSB_BAT_CURR        0x02
+#define REG_FSB_TEMP            0x03
+#define REG_FSB_MANUFACT_ID     0x08
+#define REG_FSB_DEVICE_ID       0x09
+
+// // Failsafe Mains specific register
+#define REG_FSM_BAT_VOL         0x01
+#define REG_FSM_BAT_CURR        0x02
+#define REG_FSM_TEMP            0x03
+#define REG_FSM_MANUFACT_ID     0x08
+#define REG_FSM_DEVICE_ID       0x09
+
+#define FS_TEMP_C_LSB           4.725e-3
+
 
 #ifndef DEFAULT_BATTMON_INA2XX_MAX_AMPS
 #define DEFAULT_BATTMON_INA2XX_MAX_AMPS 90.0
@@ -72,7 +75,7 @@ extern const AP_HAL::HAL& hal;
 #endif
 
 // list of addresses to probe if I2C_ADDR is zero
-const uint8_t AP_BattMonitor_INA2XX::i2c_probe_addresses[] { 0x41, 0x44, 0x45, 0x09 };
+const uint8_t AP_BattMonitor_INA2XX::i2c_probe_addresses[] { 0x41, 0x44, 0x45, 0x46, 0x47 };
 
 const AP_Param::GroupInfo AP_BattMonitor_INA2XX::var_info[] = {
 
@@ -165,7 +168,20 @@ bool AP_BattMonitor_INA2XX::configure(DevType dtype)
         break;
     }
 
-    case DevType::INAFS: {
+    case DevType::INAFSB: {
+        // no configuration needed
+        voltage_LSB = 4.725e-3;
+        current_LSB = 4.725e-3;
+        // const uint16_t cal = 0.00512 / (current_LSB * rShunt);
+        // if (write_word(REG_231_CALIBRATION, cal)) {
+        //     return true;
+        // }
+        dev_type = dtype;
+        return true;
+        break;
+    }
+
+    case DevType::INAFSM: {
         // no configuration needed
         voltage_LSB = 4.725e-3;
         current_LSB = 4.725e-3;
@@ -291,11 +307,17 @@ bool AP_BattMonitor_INA2XX::detect_device(void)
         read_word16(REG_228_DEVICE_ID, id) && (id&0xFFF0) == 0x2280) {
         return configure(DevType::INA228);
     }
-    // Added Failsafe As INA235 For AderialIQ with Manufacturing ID 0x5450 and device if 0x2350
-    if (read_word16(REG_FS_MANUFACT_ID, id) && id == FS_MANUFACT_ID &&
-        read_word16(REG_FS_DEVICE_ID, id) && (id&0xFFF0) == FS_DEVICE_ID) {
+    // Added Failsafe Batt
+    if (read_word16(REG_FSB_MANUFACT_ID, id) && id == 0x419A &&
+        read_word16(REG_FSB_DEVICE_ID, id) && (id&0xFFFF) == 0x4642) {
         has_temp = true;
-        return configure(DevType::INAFS);
+        return configure(DevType::INAFSB);
+    }
+    // Added Failsafe Main
+    if (read_word16(REG_FSM_MANUFACT_ID, id) && id == 0x419A &&
+        read_word16(REG_FSM_DEVICE_ID, id) && (id&0xFFFF) == 0x464D) {
+        has_temp = true;
+        return configure(DevType::INAFSM);
     }
     if (read_word16(REG_238_MANUFACT_ID, id) && id == 0x5449 &&
         read_word16(REG_238_DEVICE_ID, id) && (id&0xFFF0) == 0x2380) {
@@ -358,12 +380,32 @@ void AP_BattMonitor_INA2XX::timer(void)
         break;
     }
 
-    case DevType::INAFS: {
+    case DevType::INAFSB: {
         int16_t bus_voltage16, current16;
         int16_t temp16;
-        if (!read_word16(REG_FS_BAT_VOL, bus_voltage16) ||
-            !read_word16(REG_FS_BAT_CURR, current16) 
-            ||!read_word16(REG_FS_TEMP1, temp16)
+        if (!read_word16(REG_FSB_BAT_VOL, bus_voltage16) ||
+            !read_word16(REG_FSB_BAT_CURR, current16) 
+            ||!read_word16(REG_FSB_TEMP, temp16)
+        ) {
+            failed_reads++;
+            if (failed_reads > 10) {
+                // device has disconnected, we need to reconfigure it
+                dev_type = DevType::UNKNOWN;
+            }
+            return;
+        }
+        voltage = bus_voltage16 * voltage_LSB;
+        current = current16 * current_LSB;
+        temperature = (temp16&0xFFFF) * FS_TEMP_C_LSB;
+        break;
+    }
+
+    case DevType::INAFSM: {
+        int16_t bus_voltage16, current16;
+        int16_t temp16;
+        if (!read_word16(REG_FSM_BAT_VOL, bus_voltage16) ||
+            !read_word16(REG_FSM_BAT_CURR, current16) 
+            ||!read_word16(REG_FSM_TEMP, temp16)
         ) {
             failed_reads++;
             if (failed_reads > 10) {
