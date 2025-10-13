@@ -445,4 +445,13 @@ void AP_BattMonitor_INA2XX::timer(void)
     accumulate.count++;
 }
 
+/*
+  get last temperature
+ */
+bool AP_BattMonitor_INA2XX::get_temperature(float &temp) const
+{
+    temp = temperature;
+    return has_temp;
+}
+
 #endif // AP_BATTERY_INA2XX_ENABLED
